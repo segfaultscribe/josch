@@ -11,7 +11,7 @@ type Scheduler struct {
 	mu sync.Mutex
 }
 
-func (s *Scheduler) addJob(j Job) {
+func (s *Scheduler) AddJob(j Job) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -32,10 +32,8 @@ func (jq JobQueue) Less(i, j int) bool {
 	return jq[i].JobData.RunAt.Before(jq[j].JobData.RunAt)
 }
 
-// func addJob(j Job) {
-// 	pj := *&PrioritizedJob{
-// 		JobData: j,
-// 	}
-
-// 	heap.Push(*pj)
-// }
+func (jq JobQueue) Swap(i, j int) {
+	jq[i], jq[j] = jq[j], jq[i]
+	jq[i].index = i
+	jq[j].index = j
+}
