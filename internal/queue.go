@@ -1,11 +1,21 @@
 package internal
 
+import (
+	"container/heap"
+	"sync"
+)
+
 type PrioritizedJob struct {
 	JobData Job
 	index   int
 }
 
 type JobQueue []*PrioritizedJob
+
+type tsWrapJobQueue struct {
+	mu sync.Mutex
+	jq JobQueue // This holds your raw slice heap
+}
 
 func (jq JobQueue) Len() int {
 	return len(jq)
@@ -36,4 +46,52 @@ func (jq JobQueue) Swap(i, j int) {
 	jq[i], jq[j] = jq[j], jq[i]
 	jq[i].index = i
 	jq[j].index = j
+}
+
+// thread saftey stuff
+
+func New() *tsWrapJobQueue {
+	sjq := &tsWrapJobQueue{
+		jq: make(JobQueue, 0),
+	}
+
+	heap.Init(&sjq.jq)
+	return sjq
+}
+
+func (t *tsWrapJobQueue) Push(j PrioritizedJob) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	heap.Push(&t.jq, j)
+}
+
+func (t *tsWrapJobQueue) Pop() (*PrioritizedJob, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.jq) == 0 {
+		return nil, false
+	}
+
+	job := heap.Pop(&t.jq).(*PrioritizedJob)
+	return job, true
+}
+
+func (t *tsWrapJobQueue) Peek() (*PrioritizedJob, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.jq) == 0 {
+		return nil, false
+	}
+
+	return t.jq[0], true
+}
+
+func (t *tsWrapJobQueue) Len() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return len(t.jq)
 }
