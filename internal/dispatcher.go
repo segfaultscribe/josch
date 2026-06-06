@@ -14,8 +14,8 @@ type Scheduler struct {
 	mu          sync.Mutex
 	JobChannel  chan Job
 	maxJobs     int
-	readySignal chan struct{}
-	stopChannel chan struct{}
+	readySignal chan struct{} // wake up dispatcher
+	stopChannel chan struct{} // graceful shutdown
 }
 
 func NewDispatcher() *Scheduler {
@@ -35,10 +35,14 @@ func NewDispatcher() *Scheduler {
 	}
 
 	s := &Scheduler{
-		jq:         JobQueue{},
-		maxJobs:    maxJobsInt,
-		JobChannel: make(chan Job, workerPoolSizeInt),
+		jq:          JobQueue{},
+		maxJobs:     maxJobsInt,
+		JobChannel:  make(chan Job, workerPoolSizeInt),
+		readySignal: make(chan struct{}, 1),
+		stopChannel: make(chan struct{}),
 	}
+	heap.Init(&s.jq)
+	return s
 }
 
 func (s *Scheduler) AddJob(j Job) {
