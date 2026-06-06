@@ -59,7 +59,7 @@ func New() *tsWrapJobQueue {
 	return sjq
 }
 
-func (t *tsWrapJobQueue) Push(j PrioritizedJob) {
+func (t *tsWrapJobQueue) Push(j *PrioritizedJob) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

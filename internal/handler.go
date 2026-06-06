@@ -11,7 +11,7 @@ import (
 
 type CreateJobRequest struct {
 	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"` // Changed to json.RawMessage for safer unmarshaling
+	Payload json.RawMessage `json:"payload"`
 	RunAt   time.Time       `json:"run_at"`
 }
 
