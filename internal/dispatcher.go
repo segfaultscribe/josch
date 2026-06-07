@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -74,10 +73,9 @@ func (s *Scheduler) startDispatcher() {
 		s.mu.Lock()
 
 		// the condition handles when the queue is empty
-		if len(s.jq) == 0 {
-			fmt.Printf("Queue is empty!")
-			s.mu.Unlock()
-
+		pjob, exists := s.sjq.Peek()
+		if !exists {
+			// QUEUE IS EMPTY
 			// block using select
 			select {
 			case <-s.readySignal:
@@ -88,6 +86,31 @@ func (s *Scheduler) startDispatcher() {
 		}
 
 		// the queue is not empty and there are jobs to be processed
-		nextJob := s.jq[0]
+		// pjq is the next Job
+		if pjob.JobData.RunAt.Before(time.Now()) || pjob.JobData.RunAt.Equal(time.Now()) {
+			pjobPopped, ok := s.sjq.Pop()
+			if ok {
+				s.JobChannel <- pjobPopped.JobData
+			}
+			continue
+		}
+
+		// if the top job hasn't yet reached execution time
+		// we need the dispatcher to sleep BUT also
+		// wake up if a job is added to the queue
+
+		sleepDuration := pjob.JobData.RunAt.Sub(time.Now())
+		if timer == nil {
+			timer = time.NewTimer(sleepDuration)
+		} else {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(sleepDuration)
+		}
+
 	}
 }
