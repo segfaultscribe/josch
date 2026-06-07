@@ -2,6 +2,9 @@ package internal
 
 import (
 	"container/heap"
+	"log"
+	"os"
+	"strconv"
 	"sync"
 )
 
@@ -13,8 +16,9 @@ type PrioritizedJob struct {
 type JobQueue []*PrioritizedJob
 
 type tsWrapJobQueue struct {
-	mu sync.Mutex
-	jq JobQueue // This holds your raw slice heap
+	mu      sync.Mutex
+	jq      JobQueue // This holds your raw slice heap
+	maxJobs int
 }
 
 func (jq JobQueue) Len() int {
@@ -50,20 +54,32 @@ func (jq JobQueue) Swap(i, j int) {
 
 // thread saftey stuff
 
-func New() *tsWrapJobQueue {
+func NewSafeJobQueue() *tsWrapJobQueue {
+	mj := os.Getenv("MAX_JOBS")
+	mjInt, err := strconv.Atoi(mj)
+
+	if err != nil {
+		log.Fatalf("Cannot find MAX JOB limit!")
+	}
+
 	sjq := &tsWrapJobQueue{
-		jq: make(JobQueue, 0),
+		jq:      make(JobQueue, 0),
+		maxJobs: mjInt,
 	}
 
 	heap.Init(&sjq.jq)
 	return sjq
 }
 
-func (t *tsWrapJobQueue) Push(j *PrioritizedJob) {
+func (t *tsWrapJobQueue) Push(j *PrioritizedJob) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if len(t.jq) >= t.maxJobs {
+		return false
+	}
 	heap.Push(&t.jq, j)
+	return true
 }
 
 func (t *tsWrapJobQueue) Pop() (*PrioritizedJob, bool) {
