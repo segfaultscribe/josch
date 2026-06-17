@@ -10,12 +10,13 @@ import (
 
 // The core logic for the scheduler
 type Scheduler struct {
-	sjq         *tsWrapJobQueue
-	mu          sync.Mutex
-	JobChannel  chan Job
-	maxJobs     int
-	readySignal chan struct{} // wake up dispatcher
-	stopChannel chan struct{} // graceful shutdown
+	sjq           *tsWrapJobQueue
+	mu            sync.Mutex
+	immJobChannel chan Job
+	JobChannel    chan Job
+	maxJobs       int
+	readySignal   chan struct{} // wake up dispatcher
+	stopChannel   chan struct{} // graceful shutdown
 }
 
 func NewDispatcher() *Scheduler {
@@ -35,16 +36,33 @@ func NewDispatcher() *Scheduler {
 	}
 
 	s := &Scheduler{
-		sjq:         NewSafeJobQueue(),
-		maxJobs:     maxJobsInt,
-		JobChannel:  make(chan Job, workerPoolSizeInt),
-		readySignal: make(chan struct{}, 1),
-		stopChannel: make(chan struct{}),
+		sjq:           NewSafeJobQueue(),
+		maxJobs:       maxJobsInt,
+		JobChannel:    make(chan Job, workerPoolSizeInt),
+		immJobChannel: make(chan Job, workerPoolSizeInt),
+		readySignal:   make(chan struct{}, 1),
+		stopChannel:   make(chan struct{}),
 	}
 	return s
 }
 
 func (s *Scheduler) AddJob(j Job) bool {
+	now := time.Now()
+	// CASE: Immediate job
+	if j.RunAt.IsZero() || j.RunAt.Before(now) || j.RunAt.Equal(now) {
+
+		if len(s.immJobChannel) >= s.maxJobs {
+			return false
+		}
+
+		select {
+		case s.immJobChannel <- j:
+			return true
+		default:
+			return false
+		}
+	}
+
 	pjb := &PrioritizedJob{
 		JobData: j,
 		index:   -1,
@@ -63,14 +81,13 @@ func (s *Scheduler) AddJob(j Job) bool {
 	return true
 }
 
-func (s *Scheduler) startDispatcher() {
+func (s *Scheduler) StartDispatcher() {
 	// The role of the dispatcher is to act as a layer of control
 	// between the data and the worker pool
 
 	var timer *time.Timer
 	// the dispatcher loop
 	for {
-		s.mu.Lock()
 
 		// the condition handles when the queue is empty
 		pjob, exists := s.sjq.Peek()
@@ -110,6 +127,16 @@ func (s *Scheduler) startDispatcher() {
 				}
 			}
 			timer.Reset(sleepDuration)
+		}
+
+		select {
+		case imJob := <-s.immJobChannel:
+			s.JobChannel <- imJob
+		case <-timer.C:
+		case <-s.readySignal:
+		case <-s.stopChannel:
+			timer.Stop()
+			return
 		}
 
 	}

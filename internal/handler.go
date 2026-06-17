@@ -20,7 +20,17 @@ type Response struct {
 	Status string `json:"status"`
 }
 
-func HandleInjestion(w http.ResponseWriter, r *http.Request) {
+type JobHandler struct {
+	scheduler *Scheduler
+}
+
+func NewJobHandler(sched *Scheduler) *JobHandler {
+	return &JobHandler{
+		scheduler: sched,
+	}
+}
+
+func (jh *JobHandler) HandleInjestion(w http.ResponseWriter, r *http.Request) {
 	//extract the request data
 	var req CreateJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -29,7 +39,7 @@ func HandleInjestion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//create the Job
-	job := &Job{
+	job := Job{
 		ID:        ulid.Make(),
 		Type:      req.Type,
 		Payload:   req.Payload,
@@ -39,7 +49,12 @@ func HandleInjestion(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 	fmt.Println(job)
-	// scheduler.Schedule(Job)
+
+	ok := jh.scheduler.AddJob(job)
+	if !ok {
+		http.Error(w, "Scheduler queue capacity reached", http.StatusServiceUnavailable)
+		return
+	}
 
 	ret := &Response{
 		Id:     job.ID.String(),
