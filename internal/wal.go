@@ -26,14 +26,12 @@ type WALRecord struct {
 }
 
 type WAL struct {
-	WALfile    *os.File
-	Dispatcher *Scheduler
+	WALfile *os.File
 }
 
-func NewWAL(f *os.File, d *Scheduler) *WAL {
+func NewWAL(f *os.File) *WAL {
 	return &WAL{
-		WALfile:    f,
-		Dispatcher: d,
+		WALfile: f,
 	}
 }
 
@@ -42,18 +40,18 @@ func (w *WAL) AddWALRecord(wr *WALRecord) {
 
 	file, err := os.OpenFile(w.WALfile.Name(), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
-		log.Fatal("Cannot open WAL file!")
+		log.Fatal("Cannot open WAL file")
 	}
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	err = encoder.Encode(wr)
 	if err != nil {
-		log.Fatal("Error writing WAL record to file!")
+		log.Fatal("Error writing WAL record to file")
 	}
 }
 
-func (w *WAL) ReplayWAL() {
+func (w *WAL) ReplayWAL(s *Scheduler) {
 	var logs []WALRecord
 	file, err := os.OpenFile(w.WALfile.Name(), os.O_RDONLY, 0)
 	if err != nil {
@@ -95,7 +93,7 @@ func (w *WAL) ReplayWAL() {
 	}
 	// after the loop the three queues contain the state of the system before crash
 	for _, job := range standardTemp {
-		w.Dispatcher.immJobChannel <- *job
+		s.immJobChannel <- *job
 	}
 
 	for _, job := range delayedTemp {
@@ -104,7 +102,7 @@ func (w *WAL) ReplayWAL() {
 			index:   -1,
 		}
 
-		clear := w.Dispatcher.sjq.Push(pjb)
+		clear := s.sjq.Push(pjb)
 
 		if !clear {
 			log.Fatal("Failed to add job to delayed queue!")
@@ -112,11 +110,11 @@ func (w *WAL) ReplayWAL() {
 	}
 
 	for _, job := range mainQueue {
-		w.Dispatcher.JobChannel <- *job
+		s.JobChannel <- *job
 	}
 
 	select {
-	case w.Dispatcher.readySignal <- struct{}{}:
+	case s.readySignal <- struct{}{}:
 	default:
 	}
 

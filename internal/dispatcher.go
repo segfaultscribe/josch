@@ -20,6 +20,7 @@ type Scheduler struct {
 	maxJobs       int
 	readySignal   chan struct{} // wake up dispatcher
 	stopChannel   chan struct{} // graceful shutdown
+	wal           *WAL
 }
 
 func NewDispatcher() *Scheduler {
