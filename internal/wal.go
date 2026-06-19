@@ -12,9 +12,10 @@ import (
 type WALEvent string
 
 const (
-	EventScheduled WALEvent = "SCHEDULED"
-	EventInProcess WALEvent = "IN-PROCESS"
-	EventDone      WALEvent = "DONE"
+	EventScheduledStandard WALEvent = "SCHEDULED_STANDARD"
+	EventScheduledDelayed  WALEvent = "SCHEDULED_DELAYED"
+	EventInProcess         WALEvent = "IN-PROCESS"
+	EventDone              WALEvent = "DONE"
 )
 
 type WALRecord struct {
@@ -24,10 +25,22 @@ type WALRecord struct {
 	Event    WALEvent  `json:"event"`
 }
 
-func AddWALRecord(wr *WALRecord) {
-	walFile := os.Getenv("WAL_FILE")
+type WAL struct {
+	WALfile    *os.File
+	Dispatcher *Scheduler
+}
 
-	file, err := os.OpenFile(walFile, os.O_WRONLY|os.O_APPEND, 0644)
+func NewWAL(f *os.File, d *Scheduler) *WAL {
+	return &WAL{
+		WALfile:    f,
+		Dispatcher: d,
+	}
+}
+
+func (w *WAL) AddWALRecord(wr *WALRecord) {
+	// ADDS a WAL record into the current WAL File
+
+	file, err := os.OpenFile(w.WALfile.Name(), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		log.Fatal("Cannot open WAL file!")
 	}
@@ -40,10 +53,78 @@ func AddWALRecord(wr *WALRecord) {
 	}
 }
 
-func ReplayWAL() {
+func (w *WAL) ReplayWAL() {
+	var logs []WALRecord
+	file, err := os.OpenFile(w.WALfile.Name(), os.O_RDONLY, 0)
+	if err != nil {
+		log.Fatal("Error opening WAL File for replay")
+	}
+
+	decoder := json.NewDecoder(file)
+
+	for decoder.More() {
+		var entry WALRecord
+		err = decoder.Decode(&entry)
+		if err != nil {
+			log.Fatal("Error decoding WAL line")
+		}
+		logs = append(logs, entry)
+	}
+	err = decoder.Decode(&logs)
+	if err != nil {
+		log.Fatal("Error decoding WAL!")
+	}
+
+	standardTemp := make(map[ulid.ULID]*Job)
+	delayedTemp := make(map[ulid.ULID]*Job)
+	mainQueue := make(map[ulid.ULID]*Job)
+
+	for _, entry := range logs {
+		switch entry.Event {
+		case "SCHEDULED_STANDARD":
+			standardTemp[entry.RecordId] = entry.JData
+		case "SCHEDULED_DELAYED":
+			delayedTemp[entry.RecordId] = entry.JData
+		case "IN-PROCESS":
+			mainQueue[entry.RecordId] = entry.JData
+		case "DONE":
+			delete(standardTemp, entry.RecordId)
+			delete(delayedTemp, entry.RecordId)
+			delete(mainQueue, entry.RecordId)
+		}
+	}
+	// after the loop the three queues contain the state of the system before crash
+	for _, job := range standardTemp {
+		w.Dispatcher.immJobChannel <- *job
+	}
+
+	for _, job := range delayedTemp {
+		pjb := &PrioritizedJob{
+			JobData: *job,
+			index:   -1,
+		}
+
+		clear := w.Dispatcher.sjq.Push(pjb)
+
+		if !clear {
+			log.Fatal("Failed to add job to delayed queue!")
+		}
+	}
+
+	for _, job := range mainQueue {
+		w.Dispatcher.JobChannel <- *job
+	}
+
+	select {
+	case w.Dispatcher.readySignal <- struct{}{}:
+	default:
+	}
 
 }
 
-func CompactLogs() {
+func (w *WAL) CompactLogs() {
+	// tempFileName := "wal.log.tmp"
+
+	// snapshotting
 
 }

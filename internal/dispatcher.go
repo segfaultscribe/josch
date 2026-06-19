@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/oklog/ulid/v2"
 )
 
 // The core logic for the scheduler
@@ -14,6 +16,7 @@ type Scheduler struct {
 	mu            sync.Mutex
 	immJobChannel chan Job
 	JobChannel    chan Job
+	activeJobs    map[ulid.ULID]*WALRecord
 	maxJobs       int
 	readySignal   chan struct{} // wake up dispatcher
 	stopChannel   chan struct{} // graceful shutdown
@@ -40,6 +43,7 @@ func NewDispatcher() *Scheduler {
 		maxJobs:       maxJobsInt,
 		JobChannel:    make(chan Job, workerPoolSizeInt),
 		immJobChannel: make(chan Job, workerPoolSizeInt),
+		activeJobs:    make(map[ulid.ULID]*WALRecord),
 		readySignal:   make(chan struct{}, 1),
 		stopChannel:   make(chan struct{}),
 	}
@@ -57,6 +61,13 @@ func (s *Scheduler) AddJob(j Job) bool {
 
 		select {
 		case s.immJobChannel <- j:
+			wEntry := &WALRecord{
+				RecordId: ulid.Make(),
+				JData:    &j,
+				EntryAt:  time.Now(),
+				Event:    EventScheduledStandard,
+			}
+			s.activeJobs[j.ID] = wEntry
 			return true
 		default:
 			return false
@@ -108,6 +119,13 @@ func (s *Scheduler) StartDispatcher() {
 			pjobPopped, ok := s.sjq.Pop()
 			if ok {
 				s.JobChannel <- pjobPopped.JobData
+				wEntry := &WALRecord{
+					RecordId: ulid.Make(),
+					JData:    &pjob.JobData,
+					EntryAt:  time.Now(),
+					Event:    EventInProcess,
+				}
+				s.activeJobs[wEntry.RecordId] = wEntry
 			}
 			continue
 		}
