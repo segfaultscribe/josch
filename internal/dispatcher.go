@@ -23,7 +23,7 @@ type Scheduler struct {
 	wal           *WAL
 }
 
-func NewDispatcher() *Scheduler {
+func NewDispatcher(w *WAL) *Scheduler {
 
 	maxJobs := os.Getenv("MAX_JOBS")
 	maxJobsInt, err := strconv.Atoi(maxJobs)
@@ -47,6 +47,7 @@ func NewDispatcher() *Scheduler {
 		activeJobs:    make(map[ulid.ULID]*WALRecord),
 		readySignal:   make(chan struct{}, 1),
 		stopChannel:   make(chan struct{}),
+		wal:           w,
 	}
 	return s
 }
@@ -105,7 +106,6 @@ func (s *Scheduler) StartDispatcher() {
 		pjob, exists := s.sjq.Peek()
 		if !exists {
 			// QUEUE IS EMPTY
-			// block using select
 			select {
 			case <-s.readySignal:
 				continue
@@ -159,4 +159,37 @@ func (s *Scheduler) StartDispatcher() {
 		}
 
 	}
+}
+
+func (s *Scheduler) RestoreSystemState(standard []*Job, delayed []*Job, inProcess []*Job) {
+	// immediate jobs
+	for _, job := range standard {
+		s.immJobChannel <- *job
+	}
+
+	// delayed jobs
+	for _, job := range delayed {
+		pjb := &PrioritizedJob{
+			JobData: *job,
+			index:   -1,
+		}
+		if clear := s.sjq.Push(pjb); !clear {
+			log.Fatal("Failed to add job to delayed queue!")
+		}
+	}
+
+	//main queue
+	for _, job := range inProcess {
+		s.JobChannel <- *job
+	}
+}
+
+func (s *Scheduler) GetSnapshotRecords() []WALRecord {
+	var records []WALRecord
+
+	for _, rc := range s.activeJobs {
+		records = append(records, *rc)
+	}
+
+	return records
 }

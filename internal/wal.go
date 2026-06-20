@@ -29,6 +29,15 @@ type WAL struct {
 	WALfile *os.File
 }
 
+// Interface helps connect sheduler functionality to the WAL
+type RecoveryTarget interface {
+	RestoreSystemState(standard []*Job, delayed []*Job, inProcess []*Job)
+}
+
+type SnapshotSource interface {
+	GetSnapshotRecords() []WALRecord
+}
+
 func NewWAL(f *os.File) *WAL {
 	return &WAL{
 		WALfile: f,
@@ -51,7 +60,7 @@ func (w *WAL) AddWALRecord(wr *WALRecord) {
 	}
 }
 
-func (w *WAL) ReplayWAL(s *Scheduler) {
+func (w *WAL) ReplayWAL(target RecoveryTarget) {
 	var logs []WALRecord
 	file, err := os.OpenFile(w.WALfile.Name(), os.O_RDONLY, 0)
 	if err != nil {
@@ -92,37 +101,48 @@ func (w *WAL) ReplayWAL(s *Scheduler) {
 		}
 	}
 	// after the loop the three queues contain the state of the system before crash
+	// convert maps into slices for passing
+
+	var standardJobs, delayedJobs, inProcessJobs []*Job
+
 	for _, job := range standardTemp {
-		s.immJobChannel <- *job
+		standardJobs = append(standardJobs, job)
 	}
-
 	for _, job := range delayedTemp {
-		pjb := &PrioritizedJob{
-			JobData: *job,
-			index:   -1,
-		}
-
-		clear := s.sjq.Push(pjb)
-
-		if !clear {
-			log.Fatal("Failed to add job to delayed queue!")
-		}
+		delayedJobs = append(delayedJobs, job)
 	}
-
 	for _, job := range mainQueue {
-		s.JobChannel <- *job
+		inProcessJobs = append(inProcessJobs, job)
 	}
 
-	select {
-	case s.readySignal <- struct{}{}:
-	default:
-	}
+	target.RestoreSystemState(standardJobs, delayedJobs, inProcessJobs)
 
 }
 
-func (w *WAL) CompactLogs() {
+func (w *WAL) CompactLogs(source SnapshotSource) error {
 	// tempFileName := "wal.log.tmp"
 
 	// snapshotting
+	records := source.GetSnapshotRecords()
+
+	// temporary file
+	tmpFile, err := os.OpenFile("wal.log.tmp", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer tmpFile.Close()
+	encoder := json.NewEncoder(tmpFile)
+
+	for _, record := range records {
+		if err := encoder.Encode(record); err != nil {
+			return err
+		}
+	}
+
+	tmpFile.Sync()
+	tmpFile.Close()
+
+	// atomic swap
+	return os.Rename("wal.log.tmp", w.WALfile.Name())
 
 }

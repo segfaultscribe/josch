@@ -1,5 +1,5 @@
 // file to handle api endpoints
-package controller
+package main
 
 import (
 	"log"
