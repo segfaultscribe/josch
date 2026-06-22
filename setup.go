@@ -27,7 +27,6 @@ func setup() *http.ServeMux {
 
 	isFreshStart := errors.Is(statErr, os.ErrNotExist)
 
-	// 2. Open the file with Read/Write + Create + Append permissions
 	file, err := os.OpenFile(walPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal("Failed to open or create WAL file: ", err)
