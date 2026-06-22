@@ -1,4 +1,4 @@
-# JoSch (Job Scheduler)
+# JoSch
 
 JoSch is a memory-bound, resilient background job scheduling engine written from scratch in Go. It operates without an external database, utilizing an in-memory storage layer backed by a custom Write-Ahead Log (WAL) to guarantee durability and crash recovery.
 
